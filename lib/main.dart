@@ -834,11 +834,24 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
 
                                         final workingDir = File(exe).parent.path;
 
+                                        // Запускаем через `cmd /c start`:
+                                        // - корректнее для некоторых игр/лаунчеров
+                                        // - не держит дочерний процесс привязанным к нашему
+                                        //
+                                        // Важно: у `start` первый аргумент в кавычках — это title окна,
+                                        // поэтому всегда передаем пустой title "".
                                         await Process.start(
-                                          exe,
-                                          const [],
-                                          workingDirectory: workingDir,
-                                          // runInShell: false,
+                                          'cmd.exe',
+                                          [
+                                            '/c',
+                                            'start',
+                                            '""',
+                                            '/D',
+                                            workingDir,
+                                            exe,
+                                          ],
+                                          runInShell: true,
+                                          mode: ProcessStartMode.detached,
                                         );
                                       } catch (e) {
                                         if (!context.mounted) return;
@@ -1108,7 +1121,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       bat.writeln('echo Waiting for app to exit...');
       bat.writeln('timeout /t 1 /nobreak >nul');
       bat.writeln('echo Copying files...');
+      bat.writeln('echo Preserving local configs...');
+      bat.writeln('if exist "%APPDIR%\\games.json" copy /Y "%APPDIR%\\games.json" "%APPDIR%\\games.json.bak" >nul');
       bat.writeln('xcopy /E /I /Y "%SRCDIR%\\*" "%APPDIR%\\*" >nul');
+      bat.writeln('if exist "%APPDIR%\\games.json.bak" copy /Y "%APPDIR%\\games.json.bak" "%APPDIR%\\games.json" >nul');
+      bat.writeln('if exist "%APPDIR%\\games.json.bak" del /Q "%APPDIR%\\games.json.bak" >nul');
       bat.writeln('echo Starting app...');
       // Running via powershell Start-Process with -Verb RunAs to force admin like normal start
       bat.writeln(
