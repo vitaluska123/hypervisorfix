@@ -838,7 +838,7 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
                                           exe,
                                           const [],
                                           workingDirectory: workingDir,
-                                          runInShell: false,
+                                          // runInShell: false,
                                         );
                                       } catch (e) {
                                         if (!context.mounted) return;
