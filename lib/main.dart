@@ -550,8 +550,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  'Важно: команды bcdedit/shutdown требуют запуск от администратора.\n'
-                  'Автозапрос UAC должен быть реализован в Windows runner.',
+                  'Важно: Создатель данной программы не ручается за ваше устройство\n'
+                  'Используйте на свой страх и риск. Рекомендуется создать точку восстановления Windows перед использованием.',
                   textAlign: TextAlign.center,
                 ),
               ],
