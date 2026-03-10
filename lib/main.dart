@@ -1,8 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive_io.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
 
 /// Build-time version string (from `--dart-define`).
 ///
@@ -10,7 +14,11 @@ import 'package:flutter/material.dart';
 /// `--dart-define=APP_VERSION=1.2.3`
 ///
 /// If not provided, shows `dev`.
-const String kBuildVersion = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+const String kBuildVersion =
+    String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+
+const String kGithubOwner = 'vitaluska123';
+const String kGithubRepo = 'hypervisorfix';
 
 /// ---------------------------
 /// Settings (theme/accent)
@@ -221,6 +229,21 @@ class Cmd {
       stdoutText: (res.stdout ?? '').toString(),
       stderrText: (res.stderr ?? '').toString(),
     );
+  }
+
+  static Future<int> startDetached(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+  }) async {
+    // Detached so updater can run while this process exits.
+    return Process.start(
+      executable,
+      arguments,
+      workingDirectory: workingDirectory,
+      runInShell: true,
+      mode: ProcessStartMode.detached,
+    ).then((p) => p.pid);
   }
 
   /// Runs a single command line via `cmd.exe /c ...`.
@@ -871,9 +894,14 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
 /// UI: Settings
 /// ---------------------------
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
   static const _accentOptions = <Color>[
     Colors.blue,
     Colors.green,
@@ -882,6 +910,234 @@ class SettingsScreen extends StatelessWidget {
     Colors.red,
     Colors.teal,
   ];
+
+  bool _checkingUpdate = false;
+  bool _hasUpdate = false;
+  String? _latestTag;
+  String? _latestZipUrl;
+  String? _status;
+
+  Version? _parseVersion(String s) {
+    var v = s.trim();
+    if (v.startsWith('v') || v.startsWith('V')) v = v.substring(1);
+    try {
+      return Version.parse(v);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool get _isDevBuild => kBuildVersion.trim().toLowerCase() == 'dev';
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Автопроверка при запуске:
+    // - только Windows
+    // - только если это не dev-сборка
+    if (Platform.isWindows && !_isDevBuild) {
+      Future<void>.delayed(const Duration(milliseconds: 600), _checkUpdates);
+    }
+  }
+
+  Future<void> _checkUpdates() async {
+    if (!Platform.isWindows) {
+      setState(() {
+        _status = 'Обновления доступны только на Windows.';
+      });
+      return;
+    }
+
+    // На dev-сборках не проверяем обновления вообще.
+    if (_isDevBuild) {
+      setState(() {
+        _status = 'Dev-сборка: проверка обновлений отключена.';
+        _hasUpdate = false;
+        _latestTag = null;
+        _latestZipUrl = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _checkingUpdate = true;
+      _status = 'Проверяю обновления...';
+      _hasUpdate = false;
+      _latestTag = null;
+      _latestZipUrl = null;
+    });
+
+    try {
+      final uri = Uri.parse(
+        'https://api.github.com/repos/$kGithubOwner/$kGithubRepo/releases/latest',
+      );
+      final resp = await http.get(uri, headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'hypervisorfix',
+      });
+
+      if (resp.statusCode != 200) {
+        throw 'GitHub API вернул ${resp.statusCode}: ${resp.body}';
+      }
+
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final tagName = (json['tag_name'] as String?) ?? '';
+      final assets = (json['assets'] as List?)?.cast<dynamic>() ?? const [];
+
+      // У тебя всегда один стабильный asset-нейм:
+      //   hypervisorfix-windows-x64.zip
+      String? zipUrl;
+      for (final a in assets) {
+        final m = a as Map<String, dynamic>;
+        final name = (m['name'] as String?) ?? '';
+        if (name.toLowerCase() == 'hypervisorfix-windows-x64.zip') {
+          zipUrl = (m['browser_download_url'] as String?) ?? '';
+          break;
+        }
+      }
+
+      final current = _parseVersion(kBuildVersion);
+      final latest = _parseVersion(tagName);
+
+      if (latest == null) {
+        throw 'Не удалось распарсить tag_name: "$tagName"';
+      }
+      if (current == null) {
+        throw 'Текущая версия приложения некорректна: "$kBuildVersion"';
+      }
+      if (zipUrl == null || zipUrl.isEmpty) {
+        throw 'Не найден asset "hypervisorfix-windows-x64.zip" в последнем релизе.';
+      }
+
+      final updateAvailable = latest > current;
+
+      setState(() {
+        _latestTag = tagName;
+        _latestZipUrl = zipUrl;
+        _hasUpdate = updateAvailable;
+        _status = updateAvailable
+            ? 'Доступно обновление: $tagName'
+            : 'Обновлений нет. У тебя актуальная версия.';
+      });
+    } catch (e) {
+      setState(() {
+        _status = 'Ошибка проверки обновлений:\n$e';
+      });
+    } finally {
+      setState(() {
+        _checkingUpdate = false;
+      });
+    }
+  }
+
+  Future<void> _downloadAndApplyUpdate() async {
+    final url = _latestZipUrl;
+    final tag = _latestTag;
+    if (url == null || url.isEmpty || tag == null || tag.isEmpty) return;
+
+    setState(() {
+      _checkingUpdate = true;
+      _status = 'Скачиваю обновление...';
+    });
+
+    try {
+      final tempDir = Directory.systemTemp.createTempSync('hypervisorfix_upd_');
+      final zipFile = File(p.join(tempDir.path, 'update.zip'));
+
+      final resp = await http.get(Uri.parse(url));
+      if (resp.statusCode != 200) {
+        throw 'Скачивание не удалось: ${resp.statusCode}';
+      }
+      await zipFile.writeAsBytes(resp.bodyBytes);
+
+      setState(() {
+        _status = 'Распаковываю...';
+      });
+
+      final extractDir = Directory(p.join(tempDir.path, 'extracted'));
+      extractDir.createSync(recursive: true);
+
+      final archive = ZipDecoder().decodeBytes(await zipFile.readAsBytes());
+      for (final f in archive) {
+        final filename = f.name;
+        final outPath = p.join(extractDir.path, filename);
+        if (f.isFile) {
+          final outFile = File(outPath);
+          outFile.parent.createSync(recursive: true);
+          outFile.writeAsBytesSync(f.content as List<int>);
+        } else {
+          Directory(outPath).createSync(recursive: true);
+        }
+      }
+
+      final appExe = Platform.resolvedExecutable;
+      final appDir = File(appExe).parent.path;
+
+      // Find new exe in extracted folder. Prefer same name, fallback to first .exe.
+      final expectedExeName = p.basename(appExe);
+      File? newExe;
+      final extractedFiles = extractDir
+          .listSync(recursive: true)
+          .whereType<File>()
+          .toList();
+
+      for (final f in extractedFiles) {
+        if (p.basename(f.path).toLowerCase() == expectedExeName.toLowerCase()) {
+          newExe = f;
+          break;
+        }
+      }
+      newExe ??= extractedFiles.firstWhere(
+        (f) => f.path.toLowerCase().endsWith('.exe'),
+        orElse: () => throw 'Не найден .exe в архиве обновления.',
+      );
+
+      setState(() {
+        _status = 'Применяю обновление...';
+      });
+
+      final batPath = p.join(tempDir.path, 'apply_update.bat');
+
+      final bat = StringBuffer();
+      bat.writeln('@echo off');
+      bat.writeln('setlocal enabledelayedexpansion');
+      bat.writeln('set APPDIR="$appDir"');
+      bat.writeln('set SRCDIR="${extractDir.path}"');
+      bat.writeln('set EXE="$expectedExeName"');
+      bat.writeln('echo Waiting for app to exit...');
+      bat.writeln('timeout /t 1 /nobreak >nul');
+      bat.writeln('echo Copying files...');
+      bat.writeln('xcopy /E /I /Y "%SRCDIR%\\*" "%APPDIR%\\*" >nul');
+      bat.writeln('echo Starting app...');
+      // Running via powershell Start-Process with -Verb RunAs to force admin like normal start
+      bat.writeln(
+          'powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \\"%APPDIR%\\\\%EXE%\\" -Verb RunAs"');
+      bat.writeln('exit /b 0');
+
+      await File(batPath).writeAsString(bat.toString(), flush: true);
+
+      // Launch updater bat detached and exit current app.
+      await Cmd.startDetached(
+        'cmd.exe',
+        ['/c', 'start', '""', '/min', batPath],
+        workingDirectory: tempDir.path,
+      );
+
+      if (!mounted) return;
+      exit(0);
+    } catch (e) {
+      setState(() {
+        _status = 'Ошибка обновления:\n$e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _checkingUpdate = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -943,8 +1199,7 @@ class SettingsScreen extends StatelessWidget {
                         for (final c in _accentOptions)
                           _AccentSwatch(
                             color: c,
-                            selected:
-                                s.accentColor.toARGB32() == c.toARGB32(),
+                            selected: s.accentColor.toARGB32() == c.toARGB32(),
                             onTap: () {
                               SettingsStore.instance.settings.value =
                                   s.copyWith(accentColor: c);
@@ -958,6 +1213,36 @@ class SettingsScreen extends StatelessWidget {
                       'Цвет и тема применяются сразу.',
                       textAlign: TextAlign.left,
                     ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Обновления',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        FilledButton.icon(
+                          onPressed: _checkingUpdate ? null : _checkUpdates,
+                          icon: const Icon(Icons.system_update_alt),
+                          label: Text(_checkingUpdate ? 'Проверяю...' : 'Проверить'),
+                        ),
+                        const SizedBox(width: 12),
+                        FilledButton(
+                          onPressed: (!_hasUpdate || _checkingUpdate)
+                              ? null
+                              : _downloadAndApplyUpdate,
+                          child: const Text('Обновить'),
+                        ),
+                      ],
+                    ),
+                    if (_latestTag != null) ...[
+                      const SizedBox(height: 8),
+                      Text('Последний релиз: $_latestTag'),
+                    ],
+                    if (_status != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_status!),
+                    ],
                     const Spacer(),
                     Text(
                       'Версия: $kBuildVersion',

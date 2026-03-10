@@ -41,6 +41,15 @@ dependencies:
   # Simple local persistence for the list of games/fixes.
   shared_preferences: ^2.3.0
 
+  # Update checker/downloader:
+  # - GitHub Releases API requests
+  # - semver comparison
+  # - zip extraction
+  http: ^1.2.2
+  pub_semver: ^2.1.4
+  archive: ^3.6.1
+  path: ^1.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
