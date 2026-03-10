@@ -243,14 +243,26 @@ class BcdEdit {
     final res = await Cmd.run('bcdedit', const []);
     if (!res.ok) return TestSigningState.unknown;
 
-    final out = (res.stdoutText).toLowerCase();
-    // Typical bcdedit output contains: "testsigning Yes" / "testsigning No"
-    if (out.contains('testsigning') && out.contains('yes')) {
-      return TestSigningState.on;
+    // Robust parsing: look specifically at the "testsigning" line/value.
+    // Typical bcdedit output includes a line like:
+    //   testsigning              Yes
+    // or:
+    //   testsigning              No
+    final lines = res.stdoutText.split(RegExp(r'\r?\n'));
+    for (final raw in lines) {
+      final line = raw.trim().toLowerCase();
+      if (!line.startsWith('testsigning')) continue;
+
+      // Collapse whitespace and split tokens.
+      final tokens = line.split(RegExp(r'\s+'));
+      // Expect: ["testsigning", "yes"] or ["testsigning", "no"]
+      if (tokens.length >= 2) {
+        final v = tokens[1];
+        if (v == 'yes' || v == 'on' || v == 'true') return TestSigningState.on;
+        if (v == 'no' || v == 'off' || v == 'false') return TestSigningState.off;
+      }
     }
-    if (out.contains('testsigning') && out.contains('no')) {
-      return TestSigningState.off;
-    }
+
     return TestSigningState.unknown;
   }
 
@@ -430,17 +442,26 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _toggle() async {
+  Future<void> _setSwitch(bool enable) async {
     if (_busy) return;
 
-    final enable = _state != TestSigningState.on;
+    // Optimistically update UI so the switch reflects user's intent while command runs.
+    final prev = _state;
+    setState(() {
+      _busy = true;
+      _state = enable ? TestSigningState.on : TestSigningState.off;
+    });
 
-    setState(() => _busy = true);
     final res = await BcdEdit.setTestSigning(enable);
     if (!mounted) return;
-    setState(() => _busy = false);
 
     if (!res.ok) {
+      // Revert UI on failure.
+      setState(() {
+        _busy = false;
+        _state = prev;
+      });
+
       await _showError(
         title: 'Ошибка',
         message:
@@ -449,6 +470,8 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
+
+    setState(() => _busy = false);
 
     await _showInfo(
       title: 'Готово',
@@ -525,16 +548,30 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 64,
-                  child: FilledButton(
-                    onPressed: _busy ? null : _toggle,
-                    child: Text(
-                      _busy
-                          ? 'Выполняю...'
-                          : (isOn ? 'Выключить фикс' : 'Включить фикс'),
-                      style: const TextStyle(fontSize: 18),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Включить фикс',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        if (_busy) ...[
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 12),
+                        ],
+                        Switch(
+                          value: isOn,
+                          onChanged: _busy ? null : _setSwitch,
+                        ),
+                      ],
                     ),
                   ),
                 ),
