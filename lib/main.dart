@@ -220,13 +220,36 @@ class Cmd {
     return run('cmd.exe', ['/c', cmdLine]);
   }
 
-  /// Runs N cmd lines sequentially, stops on first failure.
-  static Future<CommandResult> runSequence(List<String> cmdLines) async {
+  /// Runs N cmd lines sequentially.
+  ///
+  /// By default, stops on first failure.
+  /// If [ignoreFailureAtIndices] contains an index (0-based), a non-zero exitCode
+  /// for that command will be ignored and execution continues.
+  static Future<CommandResult> runSequence(
+    List<String> cmdLines, {
+    Set<int> ignoreFailureAtIndices = const {},
+  }) async {
     CommandResult? last;
-    for (final line in cmdLines) {
+    CommandResult? firstNonIgnoredFailure;
+
+    for (var i = 0; i < cmdLines.length; i++) {
+      final line = cmdLines[i];
       last = await runCmdLine(line);
-      if (!last.ok) return last;
+
+      if (last.ok) continue;
+
+      if (ignoreFailureAtIndices.contains(i)) {
+        // Intentionally ignore failures for selected command steps
+        // (e.g. stopping/deleting a service that may not exist).
+        continue;
+      }
+
+      firstNonIgnoredFailure = last;
+      break;
     }
+
+    if (firstNonIgnoredFailure != null) return firstNonIgnoredFailure;
+
     return last ??
         CommandResult(exitCode: 0, stdoutText: '', stderrText: '');
   }
@@ -644,14 +667,16 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
     // 3) <комманда 3>
     //
     // Когда будешь готов — просто замени строки ниже на реальные команды.
-    const cmd1 = '<комманда 1>';
-    const cmd2 = '<комманда 2> "{path}"';
-    const cmd3 = '<комманда 3>';
+    const cmd1 = 'sc stop denuvo';
+    const cmd2 = 'sc delete denuvo';
+    const cmd3 = 'sc create denuvo type=kernel start=demand binPath={path}';
+    const cmd4 = 'sc start denuvo';
 
     return [
       cmd1,
-      cmd2.replaceAll('{path}', game.fixExePath),
-      cmd3,
+      cmd2,
+      cmd3.replaceAll('{path}', game.fixExePath),
+      cmd4,
     ];
   }
 
@@ -667,7 +692,13 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
 
     if (enabled) {
       final seq = _buildCommandsForGame(game);
-      final res = await Cmd.runSequence(seq);
+
+      // Твоя логика: если 1-я или 2-я команда падают — продолжаем.
+      // (например: stop/delete сервиса, которого может не быть)
+      final res = await Cmd.runSequence(
+        seq,
+        ignoreFailureAtIndices: const {0, 1},
+      );
 
       if (!res.ok) {
         await GameStore.instance.update(
