@@ -721,7 +721,22 @@ class _AddGameDialogState extends State<_AddGameDialog> {
       type: FileType.custom,
       allowedExtensions: const ['exe'],
       withData: false,
-      dialogTitle: 'Выбери .exe',
+      dialogTitle: 'Выбери файл',
+    );
+
+    final path = res?.files.single.path;
+    if (path == null || path.trim().isEmpty) return;
+
+    ctrl.text = path;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickFixFileInto(TextEditingController ctrl) async {
+    // Для фикса разрешаем любые типы файлов (.sys, .exe, .dll, и т.д.)
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      withData: false,
+      dialogTitle: 'Выбери файл фикса',
     );
 
     final path = res?.files.single.path;
@@ -814,6 +829,32 @@ class _AddGameDialogState extends State<_AddGameDialog> {
       );
     }
 
+    Widget fixFilePickerRow({
+      required TextEditingController controller,
+      required String label,
+      required String hint,
+    }) {
+      return Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                labelText: label,
+                hintText: hint,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: _submitting ? null : () => _pickFixFileInto(controller),
+            child: const Text('Выбрать файл'),
+          ),
+        ],
+      );
+    }
+
     return AlertDialog(
       title: const Text('Добавить игру'),
       content: SizedBox(
@@ -835,10 +876,10 @@ class _AddGameDialogState extends State<_AddGameDialog> {
               hint: r'C:\Games\MyGame\game.exe',
             ),
             const SizedBox(height: 12),
-            exePickerRow(
+            fixFilePickerRow(
               controller: _fixExeCtrl,
-              label: 'Файл фикса (.exe)',
-              hint: r'C:\Path\To\Fix\fix.exe',
+              label: 'Файл фикса (любой)',
+              hint: r'C:\Path\To\Fix\fix.sys',
             ),
             const SizedBox(height: 8),
             const Align(
