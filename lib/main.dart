@@ -4,6 +4,53 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+/// ---------------------------
+/// Settings (theme/accent)
+/// ---------------------------
+
+enum AppThemeMode { system, light, dark }
+
+class AppSettings {
+  AppSettings({
+    required this.themeMode,
+    required this.accentColor,
+  });
+
+  final AppThemeMode themeMode;
+  final Color accentColor;
+
+  AppSettings copyWith({AppThemeMode? themeMode, Color? accentColor}) {
+    return AppSettings(
+      themeMode: themeMode ?? this.themeMode,
+      accentColor: accentColor ?? this.accentColor,
+    );
+  }
+}
+
+class SettingsStore {
+  static final SettingsStore instance = SettingsStore._();
+  SettingsStore._();
+
+  // По умолчанию: системная тема + стандартный акцент.
+  final ValueNotifier<AppSettings> settings = ValueNotifier<AppSettings>(
+    AppSettings(
+      themeMode: AppThemeMode.system,
+      accentColor: Colors.blue,
+    ),
+  );
+}
+
+ThemeMode _toFlutterThemeMode(AppThemeMode mode) {
+  switch (mode) {
+    case AppThemeMode.system:
+      return ThemeMode.system;
+    case AppThemeMode.light:
+      return ThemeMode.light;
+    case AppThemeMode.dark:
+      return ThemeMode.dark;
+  }
+}
+
 /// Windows-only Flutter app:
 /// - Bottom navigation: Главная / Фиксы игр
 /// - Главная: toggle testsigning (bcdedit) + reboot (shutdown)
@@ -18,47 +65,63 @@ import 'package:flutter/material.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (!Platform.isWindows) {
-    // Hard fail: app is designed for Windows only.
-    runApp(const _WindowsOnlyApp());
-    return;
-  }
+  // if (!Platform.isWindows) {
+  //   // Hard fail: app is designed for Windows only.
+  //   runApp(const _WindowsOnlyApp());
+  //   return;
+  // }
 
   runApp(const HypervisorFixApp());
 }
 
-class _WindowsOnlyApp extends StatelessWidget {
-  const _WindowsOnlyApp();
+// class _WindowsOnlyApp extends StatelessWidget {
+//   const _WindowsOnlyApp();
 
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(
-          child: Text(
-            'Это приложение работает только на Windows.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
-    );
-  }
-}
+//   @override
+//   Widget build(BuildContext context) {
+//     return const MaterialApp(
+//       debugShowCheckedModeBanner: false,
+//       home: Scaffold(
+//         body: Center(
+//           child: Text(
+//             'Это приложение работает только на Windows.',
+//             textAlign: TextAlign.center,
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
 
 class HypervisorFixApp extends StatelessWidget {
   const HypervisorFixApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'HypervisorFix',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
-      home: const _RootShell(),
+    return ValueListenableBuilder<AppSettings>(
+      valueListenable: SettingsStore.instance.settings,
+      builder: (context, s, _) {
+        final seed = s.accentColor;
+
+        return MaterialApp(
+          title: 'HypervisorFix',
+          debugShowCheckedModeBanner: false,
+          themeMode: _toFlutterThemeMode(s.themeMode),
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: seed),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: seed,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          home: const _RootShell(),
+        );
+      },
     );
   }
 }
@@ -76,6 +139,7 @@ class _RootShellState extends State<_RootShell> {
   final _pages = const <Widget>[
     HomeScreen(),
     GameFixesScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -95,6 +159,11 @@ class _RootShellState extends State<_RootShell> {
             icon: Icon(Icons.videogame_asset_outlined),
             activeIcon: Icon(Icons.videogame_asset),
             label: 'Фиксы игр',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings_outlined),
+            activeIcon: Icon(Icons.settings),
+            label: 'Настройки',
           ),
         ],
       ),
@@ -689,6 +758,142 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
               onPressed: _addGame,
               child: const Icon(Icons.add),
             ),
+    );
+  }
+}
+
+/// ---------------------------
+/// UI: Settings
+/// ---------------------------
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  static const _accentOptions = <Color>[
+    Colors.blue,
+    Colors.green,
+    Colors.purple,
+    Colors.orange,
+    Colors.red,
+    Colors.teal,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Настройки'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ValueListenableBuilder<AppSettings>(
+              valueListenable: SettingsStore.instance.settings,
+              builder: (context, s, _) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Тема',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<AppThemeMode>(
+                      segments: const [
+                        ButtonSegment(
+                          value: AppThemeMode.system,
+                          label: Text('Системная'),
+                          icon: Icon(Icons.computer),
+                        ),
+                        ButtonSegment(
+                          value: AppThemeMode.light,
+                          label: Text('Светлая'),
+                          icon: Icon(Icons.light_mode_outlined),
+                        ),
+                        ButtonSegment(
+                          value: AppThemeMode.dark,
+                          label: Text('Тёмная'),
+                          icon: Icon(Icons.dark_mode_outlined),
+                        ),
+                      ],
+                      selected: <AppThemeMode>{s.themeMode},
+                      onSelectionChanged: (newSelection) {
+                        final mode = newSelection.first;
+                        SettingsStore.instance.settings.value =
+                            s.copyWith(themeMode: mode);
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Акцентный цвет',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final c in _accentOptions)
+                          _AccentSwatch(
+                            color: c,
+                            selected:
+                                s.accentColor.toARGB32() == c.toARGB32(),
+                            onTap: () {
+                              SettingsStore.instance.settings.value =
+                                  s.copyWith(accentColor: c);
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'По умолчанию используется системная тема.\n'
+                      'Цвет и тема применяются сразу.',
+                      textAlign: TextAlign.left,
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected
+                ? Theme.of(context).colorScheme.onSurface
+                : Colors.transparent,
+            width: 3,
+          ),
+        ),
+      ),
     );
   }
 }
