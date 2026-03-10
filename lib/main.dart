@@ -4,6 +4,14 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+/// Build-time version string (from `--dart-define`).
+///
+/// CI passes it like:
+/// `--dart-define=APP_VERSION=1.2.3`
+///
+/// If not provided, shows `dev`.
+const String kBuildVersion = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+
 /// ---------------------------
 /// Settings (theme/accent)
 /// ---------------------------
@@ -680,6 +688,7 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
     ];
   }
 
+
   Future<void> _setEnabled(GameEntry game, bool enabled) async {
     // We only enable "Играть" after commands succeed (fixApplied=true).
     // If commands fail, revert toggle and keep fixApplied=false.
@@ -795,10 +804,38 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
                           children: [
                             FilledButton(
                               onPressed: g.fixApplied
-                                  ? () => Cmd.run(
-                                        'cmd.exe',
-                                        ['/c', '"${g.gameExePath}"'],
-                                      )
+                                  ? () async {
+                                      try {
+                                        final exe = g.gameExePath.trim();
+                                        if (exe.isEmpty) return;
+
+                                        final workingDir = File(exe).parent.path;
+
+                                        await Process.start(
+                                          exe,
+                                          const [],
+                                          workingDirectory: workingDir,
+                                          runInShell: false,
+                                        );
+                                      } catch (e) {
+                                        if (!context.mounted) return;
+                                        await showDialog<void>(
+                                          context: context,
+                                          builder: (ctx) => AlertDialog(
+                                            title: const Text('Не удалось запустить игру'),
+                                            content: SelectableText(
+                                              'Путь:\n${g.gameExePath}\n\nОшибка:\n$e',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(ctx),
+                                                child: const Text('OK'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                    }
                                   : null,
                               child: const Text('Играть'),
                             ),
@@ -920,6 +957,12 @@ class SettingsScreen extends StatelessWidget {
                       'По умолчанию используется системная тема.\n'
                       'Цвет и тема применяются сразу.',
                       textAlign: TextAlign.left,
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Версия: $kBuildVersion',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 );

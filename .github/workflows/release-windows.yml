@@ -32,8 +32,21 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
+      - name: Determine version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ref = "${{ github.ref_name }}"
+          $version = $ref
+          if ($version.StartsWith("v")) { $version = $version.Substring(1) }
+          echo "ref_name=$ref" >> $env:GITHUB_OUTPUT
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Tag: $ref"
+          Write-Host "Version: $version"
+
       - name: Build Windows (Release)
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=APP_VERSION=${{ steps.version.outputs.version }}
 
       - name: Package build output
         shell: pwsh
@@ -42,6 +55,7 @@ jobs:
 
           $appName = "hypervisorfix"
           $outDir = "dist"
+          $version = "${{ steps.version.outputs.version }}"
 
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
@@ -50,7 +64,7 @@ jobs:
             throw "Release output not found at: $releaseDir"
           }
 
-          $zipPath = Join-Path $outDir "$appName-windows-x64.zip"
+          $zipPath = Join-Path $outDir "$appName-$version-windows-x64.zip"
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
           Compress-Archive -Path "$releaseDir/*" -DestinationPath $zipPath
