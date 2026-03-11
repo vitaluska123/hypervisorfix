@@ -43,21 +43,6 @@ const List<EmbeddedLink> kEmbeddedLinks = <EmbeddedLink>[
     description: 'Исходники и релизы',
     url: 'https://github.com/vitaluska123/hypervisorfix',
   ),
-  EmbeddedLink(
-    title: 'Black Myth: Wukong - Digital Deluxe Edition',
-    description: 'Ролевой боевик по мотивам китайской мифологии.',
-    url: 'https://rutracker.org/forum/viewtopic.php?t=6823609',
-  ),
-  EmbeddedLink(
-    title: 'Stellar Blade - Complete Edition',
-    description: 'Спасите человечество от гибели в постапокалиптическом приключенческом боевике Stellar Blade.',
-    url: 'https://rutracker.org/forum/viewtopic.php?t=6823628',
-  ),
-  EmbeddedLink(
-    title: 'Atomic Heart - Premium Edition',
-    description: 'Погрузитесь в безумную и прекрасную техноутопию, где вас на каждом шагу поджидает смерть.',
-    url: 'https://rutracker.org/forum/viewtopic.php?t=6825980',
-  )
   // Добавляй сюда свои ссылки:
   // EmbeddedLink(
   //   title: 'Название',
