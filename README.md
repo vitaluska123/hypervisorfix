@@ -1,17 +1,69 @@
-# hypervisorfix
+# HypervisorFix (Windows)
 
-A new Flutter project.
+Небольшое Windows-приложение на Flutter для переключения режима `testsigning` режима windows и запуска игровых “фиксов” (denuvo) для выбранной игры.  
+Проект ориентирован **только на Windows** (в Linux можно гонять UI в dev-режиме, но команды/обновления там отключены или не работают по смыслу).
 
-## Getting Started
+## Возможности
 
-This project is a starting point for a Flutter application.
+### Главная
+- Переключатель **“Включить фикс”** — включает/выключает `testsigning` через `bcdedit`.
+- Кнопка **“Перезагрузить ПК”** — `shutdown -r -t 0`.
+- После изменения `testsigning` приложение сообщает, что нужна перезагрузка.
 
-A few resources to get you started if this is your first Flutter project:
+> Важно: `bcdedit` и `shutdown` требуют прав администратора.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### Фиксы игр
+- Добавление игры:
+  - Название
+  - Путь к **файлу игры** (`.exe`)
+  - Путь к **файлу фикса** (любой файл: `.sys`, `.exe`, `.dll`, и т.д.)
+- Для каждой игры:
+  - Тумблер включает выполнение цепочки команд (шаблоны команд редактируются в коде).
+  - Кнопка **“Играть”** доступна только после успешного применения фикса.
+- Одновременно может быть активен **только один фикс** (при включении одного — остальные отключаются).
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+
+### Настройки
+- Тема: **системная / светлая / тёмная**.
+- Акцентный цвет.
+- Блок **обновлений** (GitHub Releases):
+  - проверка доступности обновления
+  - скачивание `hypervisorfix-windows-x64.zip`
+  - распаковка во временную папку
+  - обновление файлов приложения и перезапуск **с запросом UAC**
+- Внизу показывается версия сборки `APP_VERSION` (из `--dart-define`).  
+  На `dev`-сборках проверка обновлений отключена.
+
+## Требования
+
+- Windows 10/11 (основная целевая платформа).
+- Запуск от администратора (при старте приложение запрашивает UAC).
+
+## Сборка (локально)
+
+### Windows
+1. Установить Flutter (stable) и зависимости для сборки Windows (Visual Studio + Desktop C++).
+2. В корне проекта:
+   - `flutter pub get`
+   - `flutter build windows --release --dart-define=APP_VERSION=1.0.0`
+
+Результат: `build/windows/x64/runner/Release/`
+
+
+## Автообновление
+
+Приложение умеет проверять обновления в GitHub Releases:
+- URL: `https://api.github.com/repos/vitaluska123/hypervisorfix/releases/latest`
+- Asset: `hypervisorfix-windows-x64.zip`
+
+Обновление делается через батник (копирование поверх текущей папки приложения) и перезапуск с админ-правами.
+
+### Важно про конфиги
+Локальные конфиги (например `games.json`) сохраняются при обновлении — файл бэкапится и восстанавливается после копирования.
+
+
+## Безопасность и дисклеймер
+
+- Команды `bcdedit`, управление сервисами и перезагрузка системы потенциально опасны.
+- Используй на свой страх и риск.
+- Перед использованием рекомендуется создать точку восстановления Windows.
