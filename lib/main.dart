@@ -21,6 +21,52 @@ const String kGithubOwner = 'vitaluska123';
 const String kGithubRepo = 'hypervisorfix';
 
 /// ---------------------------
+/// Embedded links data (compiled into the app)
+/// ---------------------------
+
+class EmbeddedLink {
+  const EmbeddedLink({
+    required this.title,
+    required this.description,
+    required this.url,
+  });
+
+  final String title;
+  final String description;
+  final String url;
+}
+
+/// Просто редактируй этот список (это и есть “константа”, ничего с диска не читаем).
+const List<EmbeddedLink> kEmbeddedLinks = <EmbeddedLink>[
+  EmbeddedLink(
+    title: 'GitHub проекта',
+    description: 'Исходники и релизы',
+    url: 'https://github.com/vitaluska123/hypervisorfix',
+  ),
+  EmbeddedLink(
+    title: 'Black Myth: Wukong - Digital Deluxe Edition',
+    description: 'Ролевой боевик по мотивам китайской мифологии.',
+    url: 'https://rutracker.org/forum/viewtopic.php?t=6823609',
+  ),
+  EmbeddedLink(
+    title: 'Stellar Blade - Complete Edition',
+    description: 'Спасите человечество от гибели в постапокалиптическом приключенческом боевике Stellar Blade.',
+    url: 'https://rutracker.org/forum/viewtopic.php?t=6823628',
+  ),
+  EmbeddedLink(
+    title: 'Atomic Heart - Premium Edition',
+    description: 'Погрузитесь в безумную и прекрасную техноутопию, где вас на каждом шагу поджидает смерть.',
+    url: 'https://rutracker.org/forum/viewtopic.php?t=6825980',
+  )
+  // Добавляй сюда свои ссылки:
+  // EmbeddedLink(
+  //   title: 'Название',
+  //   description: 'Описание',
+  //   url: 'https://example.com',
+  // ),
+];
+
+/// ---------------------------
 /// Settings (theme/accent)
 /// ---------------------------
 
@@ -155,12 +201,41 @@ class _RootShellState extends State<_RootShell> {
   final _pages = const <Widget>[
     HomeScreen(),
     GameFixesScreen(),
-    SettingsScreen(),
+    LinksScreen(),
   ];
+
+  String get _title {
+    switch (_index) {
+      case 0:
+        return 'Главная';
+      case 1:
+        return 'Фиксы игр';
+      case 2:
+        return 'Ссылки';
+      default:
+        return 'HypervisorFix';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text(_title),
+        actions: [
+          IconButton(
+            tooltip: 'Настройки',
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const SettingsScreen(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _index,
@@ -177,9 +252,9 @@ class _RootShellState extends State<_RootShell> {
             label: 'Фиксы игр',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings_outlined),
-            activeIcon: Icon(Icons.settings),
-            label: 'Настройки',
+            icon: Icon(Icons.link_outlined),
+            activeIcon: Icon(Icons.link),
+            label: 'Ссылки',
           ),
         ],
       ),
@@ -294,6 +369,9 @@ enum TestSigningState { on, off, unknown }
 
 class BcdEdit {
   static Future<TestSigningState> getTestSigningState() async {
+    // Windows-only: on Linux/macOS dev runs, don't attempt to call bcdedit.
+    if (!Platform.isWindows) return TestSigningState.unknown;
+
     final res = await Cmd.run('bcdedit', const []);
     if (!res.ok) return TestSigningState.unknown;
 
@@ -321,10 +399,28 @@ class BcdEdit {
   }
 
   static Future<CommandResult> setTestSigning(bool enabled) async {
+    // Windows-only: on Linux/macOS dev runs, return a non-zero result so UI can show a message.
+    if (!Platform.isWindows) {
+      return CommandResult(
+        exitCode: 1,
+        stdoutText: '',
+        stderrText: 'Windows-only: bcdedit is not available on this platform.',
+      );
+    }
+
     return Cmd.run('bcdedit', ['/set', 'testsigning', enabled ? 'on' : 'off']);
   }
 
   static Future<CommandResult> rebootNow() async {
+    // Windows-only: on Linux/macOS dev runs, return a non-zero result so UI can show a message.
+    if (!Platform.isWindows) {
+      return CommandResult(
+        exitCode: 1,
+        stdoutText: '',
+        stderrText: 'Windows-only: shutdown is not available on this platform.',
+      );
+    }
+
     return Cmd.run('shutdown', const ['-r', '-t', '0']);
   }
 }
@@ -578,16 +674,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final isOn = _state == TestSigningState.on;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Главная'),
-        actions: [
-          IconButton(
-            tooltip: 'Обновить',
-            onPressed: _busy ? null : _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Center(
@@ -713,8 +799,10 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
 
 
   Future<void> _setEnabled(GameEntry game, bool enabled) async {
-    // We only enable "Играть" after commands succeed (fixApplied=true).
-    // If commands fail, revert toggle and keep fixApplied=false.
+    // Только 1 фикс может быть включен одновременно:
+    // когда включаем текущую игру — выключаем все остальные.
+    //
+    // "Играть" доступна только после успешного выполнения команд (fixApplied=true).
     final previousEnabled = game.enabled;
 
     // Any toggle change resets applied-state until we (re)apply successfully.
@@ -723,6 +811,17 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
     );
 
     if (enabled) {
+      // Turn off all other games immediately (single-active rule).
+      final others = GameStore.instance.games.value.where((g) => g.id != game.id);
+      for (final other in others) {
+        if (other.enabled || other.fixApplied) {
+          // Мы пока не выполняем "disable-команды" — просто сбрасываем состояние.
+          await GameStore.instance.update(
+            other.copyWith(enabled: false, fixApplied: false),
+          );
+        }
+      }
+
       final seq = _buildCommandsForGame(game);
 
       // Твоя логика: если 1-я или 2-я команда падают — продолжаем.
@@ -733,6 +832,7 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
       );
 
       if (!res.ok) {
+        // Если команды не применились — возвращаем тумблер назад.
         await GameStore.instance.update(
           game.copyWith(enabled: previousEnabled, fixApplied: false),
         );
@@ -789,16 +889,6 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Фиксы игр'),
-        actions: [
-          IconButton(
-            tooltip: 'Добавить',
-            onPressed: _loaded ? _addGame : null,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : ValueListenableBuilder<List<GameEntry>>(
@@ -899,6 +989,96 @@ class _GameFixesScreenState extends State<GameFixesScreen> {
               onPressed: _addGame,
               child: const Icon(Icons.add),
             ),
+    );
+  }
+}
+
+/// ---------------------------
+/// UI: Links
+/// ---------------------------
+
+class LinksScreen extends StatelessWidget {
+  const LinksScreen({super.key});
+
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final u = url.trim();
+    if (u.isEmpty) return;
+
+    // App is Windows-only. In Linux/macOS dev UI runs, don't try to spawn cmd.exe.
+    if (!Platform.isWindows) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Недоступно'),
+          content: const Text(
+            'Открытие ссылок работает только на Windows (в dev на Linux это отключено).',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Windows-friendly: delegate to shell to open default browser.
+    await Process.start(
+      'cmd.exe',
+      ['/c', 'start', '""', u],
+      runInShell: true,
+      mode: ProcessStartMode.detached,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Padding(
+        padding: const EdgeInsets.all(12),
+        child: ListView.separated(
+          itemCount: kEmbeddedLinks.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final l = kEmbeddedLinks[index];
+            return Card(
+              child: ListTile(
+                title: Text(l.title),
+                subtitle: Text(l.description),
+                leading: const Icon(Icons.link),
+                trailing: FilledButton(
+                  onPressed: () async {
+                    try {
+                      await _openUrl(context, l.url);
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Не удалось открыть ссылку'),
+                          content: SelectableText(
+                            'URL:\n${l.url}\n\nОшибка:\n$e',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Открыть'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
